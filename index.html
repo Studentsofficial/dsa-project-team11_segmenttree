@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Market Peak Finder</title>
+    <style>
+        /* Keep all your original CSS styling exactly the same here */
+        :root {
+            --bg-dark: #09090b; --panel-bg: #18181b; --text-main: #f4f4f5;
+            --text-muted: #a1a1aa; --bar-color: #3f6212; --bar-highlight: #84cc16;
+            --bar-selected: #3b82f6; --peak-line: #ef4444;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Courier New', Courier, monospace; }
+        body { background-color: var(--bg-dark); color: var(--text-main); display: flex; flex-direction: column; height: 100vh; padding: 20px; }
+        header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; padding-bottom: 10px; border-bottom: 1px solid #27272a; }
+        header h1 { font-size: 1.5em; letter-spacing: 1px; color: #bef264; }
+        .dashboard { display: flex; gap: 20px; flex: 1; }
+        .chart-section { flex: 3; background-color: var(--panel-bg); padding: 20px; border-radius: 8px; display: flex; flex-direction: column; }
+        .chart-header { margin-bottom: 20px; color: var(--text-muted); font-size: 0.9em; }
+        .chart-container { flex: 1; position: relative; display: flex; align-items: flex-end; gap: 2px; border-bottom: 1px solid #3f3f46; border-left: 1px solid #3f3f46; padding-top: 20px; }
+        .bar-wrapper { flex: 1; height: 100%; display: flex; flex-direction: column; justify-content: flex-end; position: relative; cursor: ew-resize; }
+        .bar { width: 100%; background-color: var(--bar-color); transition: height 0.1s ease-out, background-color 0.2s; border-top-left-radius: 2px; border-top-right-radius: 2px; }
+        .bar:hover { background-color: var(--bar-highlight); }
+        .bar-wrapper.selected .bar { background-color: var(--bar-selected); }
+        .peak-line { position: absolute; left: 0; right: 0; border-top: 2px dashed var(--peak-line); z-index: 10; pointer-events: none; display: none; transition: bottom 0.1s ease-out; }
+        .peak-label { position: absolute; right: 10px; top: -25px; color: var(--peak-line); background: var(--bg-dark); padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.9em; }
+        .controls-section { flex: 1; display: flex; flex-direction: column; gap: 20px; }
+        .panel { background-color: var(--panel-bg); padding: 20px; border-radius: 8px; }
+        .panel h2 { font-size: 1.1em; margin-bottom: 15px; color: var(--text-muted); text-transform: uppercase; }
+        .metric { font-size: 2.5em; font-weight: bold; color: var(--bar-selected); margin: 10px 0; }
+        button { width: 100%; padding: 12px; background-color: #27272a; color: white; border: 1px solid #3f3f46; border-radius: 4px; cursor: pointer; font-weight: bold; font-family: inherit; margin-bottom: 10px; transition: background 0.2s; }
+        button:hover { background-color: #3f3f46; }
+        button.active { background-color: var(--bar-highlight); color: black; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>PEAK FINDER <span style="font-size: 0.5em; color: gray;">(C++ Backend Edition)</span></h1>
+        <div id="statusIndicator">Market Status: PAUSED</div>
+    </header>
+
+    <div class="dashboard">
+        <div class="chart-section">
+            <div class="chart-header">
+                Drag across the timeline. Segment Tree queries are now calculated on the C++ server!
+            </div>
+            
+            <div class="chart-container" id="chartContainer">
+                <div class="peak-line" id="peakLine">
+                    <div class="peak-label" id="peakLabel">$0.00</div>
+                </div>
+            </div>
+            
+            <div style="display: flex; justify-content: space-between; margin-top: 5px; color: var(--text-muted); font-size: 0.8em;">
+                <span>Minute 1</span>
+                <span>Minute 60</span>
+            </div>
+        </div>
+
+        <div class="controls-section">
+            <div class="panel">
+                <h2>Analysis Window</h2>
+                <div id="timeRangeLabel" style="color: var(--text-muted);">No range selected</div>
+                <div class="metric" id="maxPriceMetric">--</div>
+                <div style="font-size: 0.8em; color: var(--peak-line);">Calculated on server in O(log N)</div>
+            </div>
+
+            <div class="panel">
+                <h2>Market Simulation</h2>
+                <p style="font-size: 0.8em; color: var(--text-muted); margin-bottom: 15px;">
+                    REST API calls tell the server to generate new ticks and update the C++ Segment Tree.
+                </p>
+                <button id="toggleMarketBtn">START MARKET</button>
+                <button id="clearSelectionBtn">CLEAR SELECTION</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const n = 60; 
+        const MAX_PRICE = 500; 
+
+        const chartContainer = document.getElementById('chartContainer');
+        const peakLine = document.getElementById('peakLine');
+        const peakLabel = document.getElementById('peakLabel');
+        const timeRangeLabel = document.getElementById('timeRangeLabel');
+        const maxPriceMetric = document.getElementById('maxPriceMetric');
+        const toggleMarketBtn = document.getElementById('toggleMarketBtn');
+        const statusIndicator = document.getElementById('statusIndicator');
+
+        let isDragging = false;
+        let dragStartIndex = -1;
+        let currentSelection = { l: -1, r: -1 };
+        let marketInterval = null;
+
+        // Fetch initial array from C++ server
+        async function initData() {
+            try {
+                const response = await fetch('/api/data');
+                const data = await response.json();
+                
+                // Build DOM Elements
+                for (let i = 1; i <= n; i++) {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'bar-wrapper';
+                    wrapper.id = `wrapper-${i}`;
+                    
+                    const bar = document.createElement('div');
+                    bar.className = 'bar';
+                    bar.id = `bar-${i}`;
+                    
+                    wrapper.appendChild(bar);
+                    
+                    wrapper.addEventListener('mousedown', () => {
+                        isDragging = true;
+                        dragStartIndex = i;
+                        updateSelection(i, i);
+                    });
+
+                    wrapper.addEventListener('mouseenter', () => {
+                        if (isDragging) updateSelection(dragStartIndex, i);
+                    });
+
+                    chartContainer.appendChild(wrapper);
+                    updateBarVisual(i, data.prices[i-1]);
+                }
+            } catch (err) {
+                console.error("Failed to load data from server. Is the C++ backend running?", err);
+            }
+        }
+
+        function updateBarVisual(index, price) {
+            const barEl = document.getElementById(`bar-${index}`);
+            if(!barEl) return;
+            const heightPercent = (price / MAX_PRICE) * 100;
+            barEl.style.height = `${heightPercent}%`;
+            barEl.title = `Minute: ${index} | Price: $${price}`;
+        }
+
+        function updateSelection(start, end) {
+            if (start === -1 || end === -1) {
+                currentSelection = { l: -1, r: -1 };
+                document.querySelectorAll('.bar-wrapper').forEach(el => el.classList.remove('selected'));
+                peakLine.style.display = 'none';
+                timeRangeLabel.textContent = 'No range selected';
+                maxPriceMetric.textContent = '--';
+                return;
+            }
+
+            const l = Math.min(start, end);
+            const r = Math.max(start, end);
+            currentSelection = { l, r };
+
+            for (let i = 1; i <= n; i++) {
+                const wrapper = document.getElementById(`wrapper-${i}`);
+                if (i >= l && i <= r) wrapper.classList.add('selected');
+                else wrapper.classList.remove('selected');
+            }
+
+            refreshQuery();
+        }
+
+        // Ask C++ Server for the Segment Tree Query
+        async function refreshQuery() {
+            if (currentSelection.l === -1) return;
+
+            try {
+                const res = await fetch(`/api/query?l=${currentSelection.l}&r=${currentSelection.r}`);
+                const data = await res.json();
+                const peakPrice = data.peak;
+
+                timeRangeLabel.textContent = `Minute ${currentSelection.l} to ${currentSelection.r}`;
+                maxPriceMetric.textContent = `$${peakPrice}`;
+
+                peakLine.style.display = 'block';
+                const heightPercent = (peakPrice / MAX_PRICE) * 100;
+                peakLine.style.bottom = `${heightPercent}%`;
+                peakLabel.textContent = `$${peakPrice}`;
+            } catch (err) {
+                console.error("Query failed", err);
+            }
+        }
+
+        window.addEventListener('mouseup', () => { isDragging = false; });
+
+        // Tell C++ server to process a market tick, then update the UI
+        async function tickMarket() {
+            try {
+                const res = await fetch('/api/tick', { method: 'POST' });
+                const data = await res.json();
+                
+                data.updates.forEach(update => {
+                    updateBarVisual(update.index, update.price);
+                });
+
+                refreshQuery();
+            } catch (err) {
+                console.error("Market tick failed", err);
+            }
+        }
+
+        toggleMarketBtn.addEventListener('click', () => {
+            if (marketInterval) {
+                clearInterval(marketInterval);
+                marketInterval = null;
+                toggleMarketBtn.textContent = 'START MARKET';
+                toggleMarketBtn.classList.remove('active');
+                statusIndicator.textContent = 'Market Status: PAUSED';
+                statusIndicator.style.color = 'var(--text-muted)';
+            } else {
+                marketInterval = setInterval(tickMarket, 250);
+                toggleMarketBtn.textContent = 'STOP MARKET';
+                toggleMarketBtn.classList.add('active');
+                statusIndicator.textContent = 'Market Status: LIVE TRADING';
+                statusIndicator.style.color = 'var(--bar-highlight)';
+            }
+        });
+
+        document.getElementById('clearSelectionBtn').addEventListener('click', () => {
+            updateSelection(-1, -1);
+        });
+
+        initData();
+    </script>
+</body>
+</html>
