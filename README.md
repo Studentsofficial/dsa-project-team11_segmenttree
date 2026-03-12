@@ -194,3 +194,11 @@ The same constants are mirrored in `index.html` for chart rendering. If you chan
 ## Algorithm Notes
 
 The Segment Tree is 1-indexed and allocated with `4 * n + 1` nodes. Build time is O(N). Point updates and range-maximum queries each run in O(log N). The tree is held in memory for the lifetime of the server process; there is no persistence of price data across restarts.
+
+## Authors
+* **Team 11**
+  * Amith K S (CB.SC.U4CYS24106)
+  * Aadithyan S (CB.SC.U4CYS24103)
+  * Asmi S L (CB.SC.U4CYS24108)
+  * Gayatri Rajesh (CB.SC.U4CYS24120)
+  * Nikhilesh S (CB.SC.U4CYS24133)
